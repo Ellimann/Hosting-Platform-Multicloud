@@ -1,0 +1,70 @@
+name: Multicloud CI/CD Deployment
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # permet un déclenchement manuel
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to Multicloud
+    runs-on: ubuntu-latest
+
+    env:
+      TF_VAR_environment: production
+      ANSIBLE_HOST_KEY_CHECKING: False
+
+    steps:
+      # 1️⃣ Récupération du code source
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Configuration du cache Terraform pour accélérer les builds
+      - name: Setup Terraform cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            .terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      # 3️⃣ Installation de Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.3
+
+      # 4️⃣ Initialisation Terraform
+      - name: Terraform Init
+        run: terraform init
+
+      # 5️⃣ Vérification du plan d'infrastructure
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      # 6️⃣ Application du plan Terraform (si succès)
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      # 7️⃣ Installation d’Ansible
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
+      # 8️⃣ Déploiement des configurations Ansible
+      - name: Run Ansible Playbook
+        run: ansible-playbook -i inventories/hosts.yml playbooks/deploy.yml
+
+      # 9️⃣ Notification de déploiement (facultatif)
+      - name: Notify deployment
+        if: success()
+        run: echo "✅ Multicloud deployment completed successfully!"
