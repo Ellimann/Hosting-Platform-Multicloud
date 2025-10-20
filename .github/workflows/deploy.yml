@@ -8,63 +8,81 @@ on:
 
 permissions:
   contents: read
-  actions: read
   id-token: write
 
 jobs:
   deploy:
-    name: Deploy to Multicloud
     runs-on: ubuntu-latest
+    name: Deploy Infrastructure to Multicloud
 
     env:
-      TF_VAR_environment: production
-      ANSIBLE_HOST_KEY_CHECKING: False
+      TF_CLI_ARGS_apply: "-auto-approve"
+      TF_WORKING_DIR: ./terraform
 
     steps:
-      # 1️⃣ Récupération du code source
+      # 1️⃣ Récupération du dépôt
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Configuration du cache Terraform pour accélérer les builds
-      - name: Setup Terraform cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.terraform.d/plugin-cache
-            .terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-
-      # 3️⃣ Installation de Terraform
+      # 2️⃣ Installation de Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.3
 
-      # 4️⃣ Initialisation Terraform
+      # 3️⃣ Sélection du Cloud Provider (automatique ou manuel)
+      - name: Set Cloud Provider
+        run: |
+          echo "Cloud provider selection:"
+          echo "AWS credentials available: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}"
+          echo "Azure credentials available: ${{ secrets.AZURE_CLIENT_ID != '' }}"
+          echo "GCP credentials available: ${{ secrets.GCP_CREDENTIALS != '' }}"
+
+      # 4️⃣ Authentification Multicloud
+      - name: Authenticate AWS
+        if: env.AWS_ACCESS_KEY_ID != ''
+        run: |
+          echo "Authenticating to AWS..."
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set default.region ${{ secrets.AWS_REGION }}
+
+      - name: Authenticate Azure
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Authenticate GCP
+        if: env.GCP_CREDENTIALS != ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      # 5️⃣ Initialisation Terraform
       - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init
 
-      # 5️⃣ Vérification du plan d'infrastructure
+      # 6️⃣ Validation de la configuration
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      # 7️⃣ Plan de déploiement
       - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform plan -out=tfplan
 
-      # 6️⃣ Application du plan Terraform (si succès)
+      # 8️⃣ Application du plan
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply $TF_CLI_ARGS_apply tfplan
 
-      # 7️⃣ Installation d’Ansible
-      - name: Setup Ansible
-        run: |
-          sudo apt update
-          sudo apt install -y ansible
-
-      # 8️⃣ Déploiement des configurations Ansible
-      - name: Run Ansible Playbook
-        run: ansible-playbook -i inventories/hosts.yml playbooks/deploy.yml
-
-      # 9️⃣ Notification de déploiement (facultatif)
-      - name: Notify deployment
+      # 9️⃣ Notification de fin
+      - name: Notify Completion
         if: success()
-        run: echo "✅ Multicloud deployment completed successfully!"
+        run: echo "✅ Multicloud infrastructure successfully deployed!"
