@@ -81,6 +81,7 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply $TF_CLI_ARGS_apply tfplan
+        
 
       # 9️⃣ Notification de fin
       - name: Notify Completion
